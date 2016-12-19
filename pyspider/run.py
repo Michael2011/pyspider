@@ -82,9 +82,12 @@ def connect_rpc(ctx, param, value):
               help='[deprecated] beanstalk config for beanstalk queue. '
               'please use --message-queue instead.')
 @click.option('--phantomjs-proxy', envvar='PHANTOMJS_PROXY', help="phantomjs proxy ip:port")
+
 @click.option('--data-path', default='./data', help='data dir path')
 @click.option('--add-sys-path/--not-add-sys-path', default=True, is_flag=True,
               help='add current working directory to python lib search path')
+# daixm
+@click.option('--phantomjs-bin', envvar='PHANTOMJS_BIN', default='./phantomjs-linux/phantomjs', help="phantomjs bin file")
 @click.version_option(version=pyspider.__version__, prog_name=pyspider.__name__)
 @click.pass_context
 def cli(ctx, **kwargs):
@@ -219,14 +222,11 @@ def scheduler(ctx, xmlrpc, xmlrpc_host, xmlrpc_port,
 @click.option('--proxy', help="proxy host:port")
 @click.option('--user-agent', help='user agent')
 @click.option('--timeout', help='default fetch timeout')
-@click.option('--phantomjs-endpoint', help="endpoint of phantomjs, start via pyspider phantomjs")
-@click.option('--splash-endpoint', help="execute endpoint of splash: http://splash.readthedocs.io/en/stable/api.html#execute")
 @click.option('--fetcher-cls', default='pyspider.fetcher.Fetcher', callback=load_cls,
               help='Fetcher class to be used.')
 @click.pass_context
 def fetcher(ctx, xmlrpc, xmlrpc_host, xmlrpc_port, poolsize, proxy, user_agent,
-            timeout, phantomjs_endpoint, splash_endpoint, fetcher_cls,
-            async=True, get_object=False, no_input=False):
+            timeout, fetcher_cls, async=True, get_object=False, no_input=False):
     """
     Run Fetcher.
     """
@@ -241,8 +241,9 @@ def fetcher(ctx, xmlrpc, xmlrpc_host, xmlrpc_port, poolsize, proxy, user_agent,
         outqueue = g.fetcher2processor
     fetcher = Fetcher(inqueue=inqueue, outqueue=outqueue,
                       poolsize=poolsize, proxy=proxy, async=async)
-    fetcher.phantomjs_proxy = phantomjs_endpoint or g.phantomjs_proxy
-    fetcher.splash_endpoint = splash_endpoint
+    fetcher.phantomjs_proxy = g.phantomjs_proxy
+    fetcher.phantomjs_bin = g.phantomjs_bin
+
     if user_agent:
         fetcher.user_agent = user_agent
     if timeout:
@@ -459,13 +460,13 @@ def all(ctx, fetcher_num, processor_num, result_worker_num, run_in):
 
     try:
         # phantomjs
-        if not g.get('phantomjs_proxy'):
-            phantomjs_config = g.config.get('phantomjs', {})
-            phantomjs_config.setdefault('auto_restart', True)
-            threads.append(run_in(ctx.invoke, phantomjs, **phantomjs_config))
-            time.sleep(2)
-            if threads[-1].is_alive() and not g.get('phantomjs_proxy'):
-                g['phantomjs_proxy'] = '127.0.0.1:%s' % phantomjs_config.get('port', 25555)
+        # if not g.get('phantomjs_proxy'):
+        #     phantomjs_config = g.config.get('phantomjs', {})
+        #     phantomjs_config.setdefault('auto_restart', True)
+        #     threads.append(run_in(ctx.invoke, phantomjs, **phantomjs_config))
+        #     time.sleep(2)
+        #     if threads[-1].is_alive() and not g.get('phantomjs_proxy'):
+        #         g['phantomjs_proxy'] = '127.0.0.1:%s' % phantomjs_config.get('port', 25555)
 
         # result worker
         result_worker_config = g.config.get('result_worker', {})
@@ -621,10 +622,7 @@ def bench(ctx, fetcher_num, processor_num, result_worker_num, run_in, total, sho
         scheduler_rpc = connect_rpc(ctx, None,
                                     'http://%(xmlrpc_host)s:%(xmlrpc_port)s/' % scheduler_config)
 
-        for _ in range(20):
-            if utils.check_port_open(23333):
-                break
-            time.sleep(1)
+        time.sleep(2)
 
         scheduler_rpc.newtask({
             "project": project_name,
