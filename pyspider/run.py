@@ -120,9 +120,9 @@ def cli(ctx, **kwargs):
                 os.mkdir(kwargs['data_path'])
             if db in ('taskdb', 'resultdb'):
                 kwargs[db] = utils.Get(lambda db=db: connect_database('sqlite+%s://' % (db)))
-            else:
-                kwargs[db] = utils.Get(lambda db=db: connect_database('sqlite+%s:///%s/%s.db' % (
-                    db, kwargs['data_path'], db[:-2])))
+            elif db in ('projectdb', ):
+                kwargs[db] = utils.Get(lambda db=db: connect_database('local+%s://%s' % (
+                    db, os.path.join(os.path.dirname(__file__), 'libs/bench.py'))))
         else:
             if not os.path.exists(kwargs['data_path']):
                 os.mkdir(kwargs['data_path'])
@@ -180,13 +180,14 @@ def cli(ctx, **kwargs):
               help='delete time before marked as delete')
 @click.option('--active-tasks', default=100, help='active log size')
 @click.option('--loop-limit', default=1000, help='maximum number of tasks due with in a loop')
+@click.option('--fail-pause-num', default=10, help='auto pause the project when last FAIL_PAUSE_NUM task failed, set 0 to disable')
 @click.option('--scheduler-cls', default='pyspider.scheduler.ThreadBaseScheduler', callback=load_cls,
               help='scheduler class to be used.')
 @click.option('--threads', default=None, help='thread number for ThreadBaseScheduler, default: 4')
 @click.pass_context
 def scheduler(ctx, xmlrpc, xmlrpc_host, xmlrpc_port,
-              inqueue_limit, delete_time, active_tasks, loop_limit, scheduler_cls,
-              threads, get_object=False):
+              inqueue_limit, delete_time, active_tasks, loop_limit, fail_pause_num,
+              scheduler_cls, threads, get_object=False):
     """
     Run Scheduler, only one scheduler is allowed.
     """
@@ -204,6 +205,7 @@ def scheduler(ctx, xmlrpc, xmlrpc_host, xmlrpc_port,
     scheduler.DELETE_TIME = delete_time
     scheduler.ACTIVE_TASKS = active_tasks
     scheduler.LOOP_LIMIT = loop_limit
+    scheduler.FAIL_PAUSE_NUM = fail_pause_num
 
     g.instances.append(scheduler)
     if g.get('testing_mode') or get_object:
@@ -555,22 +557,13 @@ def bench(ctx, fetcher_num, processor_num, result_worker_num, run_in, total, sho
     if not all_test and not all_bench:
         return
 
-    project_name = '__bench_test__'
+    project_name = 'bench'
 
     def clear_project():
         g.taskdb.drop(project_name)
-        g.projectdb.drop(project_name)
         g.resultdb.drop(project_name)
 
     clear_project()
-    g.projectdb.insert(project_name, {
-        'name': project_name,
-        'status': 'RUNNING',
-        'script': bench.bench_script % {'total': total, 'show': show},
-        'rate': total,
-        'burst': total,
-        'updatetime': time.time()
-    })
 
     # disable log
     logging.getLogger().setLevel(logging.ERROR)
@@ -628,6 +621,9 @@ def bench(ctx, fetcher_num, processor_num, result_worker_num, run_in, total, sho
             "project": project_name,
             "taskid": "on_start",
             "url": "data:,on_start",
+            "fetch": {
+                "save": {"total": total, "show": show}
+            },
             "process": {
                 "callback": "on_start",
             },
